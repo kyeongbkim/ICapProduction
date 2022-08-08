@@ -19,7 +19,8 @@ from sklearn.utils import shuffle
 
 
 class CaptionData(object):
-    def __init__(self):
+    def __init__(self, dataset_name):
+        self.dataset_name = dataset_name
         self.data_dir = None
         self.workspace_dir = None
         self.image_dir = None
@@ -69,16 +70,31 @@ class CaptionData(object):
                     pickle.dump(caption_seqs, f)
         self.caption_seqs = caption_seqs
         self.max_seq_len = max([len(seq) for seq_list in caption_seqs.values() for seq in seq_list])
+        if f_save:
+            caption_seq_info_file_path = self.workspace_dir + '/{}-caption_sequence_info.pkl'.format(self.dataset_name)
+            with open(caption_seq_info_file_path, 'wb') as f:
+                pickle.dump({ 'max_seq_len': self.max_seq_len }, f)
 
     def get_max_seq_len(self):
+        if not self.max_seq_len:
+            caption_seq_info_file_path = self.workspace_dir + '/{}-caption_sequence_info.pkl'.format(self.dataset_name)
+            with open(caption_seq_info_file_path, 'rb') as f:
+                caption_seq_info = pickle.load(f)
+                self.max_seq_len = caption_seq_info['max_seq_len']
+
         return self.max_seq_len
 
 
 class CaptionData_Flickr8k(CaptionData):
-    def __init__(self, data_dir, workspace_dir, limit_num_images=0, train_data_ratio=0.8):
+    def __init__(self, dataset_name, data_dir, workspace_dir, limit_num_images=0, train_data_ratio=0.8, deployment=False):
+        super().__init__(dataset_name)
         self.data_dir = data_dir
         self.workspace_dir = workspace_dir
         self.image_dir    = data_dir + '/flickr8k/Flickr8k_Dataset/Flicker8k_Dataset/'
+
+        if deployment:
+            self.pd_data = pd.DataFrame()
+            return
 
         train_images_file = data_dir + '/flickr8k/Flickr8k_text/Flickr_8k.trainImages.txt'
         dev_images_file   = data_dir + '/flickr8k/Flickr8k_text/Flickr_8k.devImages.txt'
@@ -129,10 +145,15 @@ class CaptionData_Flickr8k(CaptionData):
 
 
 class CaptionData_Flickr30k(CaptionData):
-    def __init__(self, data_dir, workspace_dir, limit_num_images=0, train_data_ratio=0.8):
+    def __init__(self, dataset_name, data_dir, workspace_dir, limit_num_images=0, train_data_ratio=0.8, deployment=False):
+        super().__init__(dataset_name)
         self.data_dir = data_dir
         self.workspace_dir = workspace_dir
         self.image_dir = data_dir + '/Flickr30k_dataset/flickr30k_images/flickr30k_images'
+
+        if deployment:
+            self.pd_data = pd.DataFrame()
+            return
 
         caption_file_path = data_dir + '/Flickr30k_dataset/flickr30k_images/results_fixed.csv'
 
@@ -291,6 +312,7 @@ class FastTextEmbedding(object):
 class ImageFeatureExtractorVGG16(object):
     def __init__(self, prefix, image_dir, workspace_dir, include_top=True):
         self.image_dir = image_dir
+        self.feature_shape = None
         self.reshape = None
         if include_top:
             self.feature_dir = workspace_dir + '/' + prefix + '-vgg16-include_top'
@@ -356,7 +378,17 @@ class ImageFeatureExtractorVGG16(object):
             return self.features[image_id]
 
     def get_feature_shape(self):
-        return next(iter(self.features.values())).shape
+        if self.feature_shape:
+            return self.feature_shape
+
+        sample_jpg = str(pathlib.Path(__file__).parent.resolve()) + '/sample.jpg'
+        img = self.load_image(sample_jpg)
+        features = self.model(tf.expand_dims(img, 0))[0]
+        if self.reshape:
+            features = tf.reshape(features, self.reshape)
+
+        self.feature_shape = features.shape
+        return self.feature_shape
 
 class ImageCaptioning(object):
     def __init__(self, dataset_name, model_name):
@@ -372,11 +404,14 @@ class ImageCaptioning(object):
 
         self.model = None
 
-    def load_dataset(self, dataset_name):
+    def load_dataset(self, dataset_name, deployment=False):
         if dataset_name == 'Flickr8k':
             self.dataset_name_base = 'Flickr8k'
-            self.caption_data = CaptionData_Flickr8k(self.data_dir, self.workspace_dir,
-                                                     limit_num_images=8000, train_data_ratio=0.8)
+            self.caption_data = CaptionData_Flickr8k(dataset_name,
+                                                     self.data_dir, self.workspace_dir,
+                                                     limit_num_images=8000,
+                                                     train_data_ratio=0.8,
+                                                     deployment=deployment)
         elif dataset_name.startswith('Flickr30k'):
             self.dataset_name_base = 'Flickr30k'
             try:
@@ -387,9 +422,11 @@ class ImageCaptioning(object):
                 limit_num_images = 30000
                 train_data_ratio = 0.8
 
-            self.caption_data = CaptionData_Flickr30k(self.data_dir, self.workspace_dir,
+            self.caption_data = CaptionData_Flickr30k(dataset_name,
+                                                      self.data_dir, self.workspace_dir,
                                                       limit_num_images=limit_num_images,
-                                                      train_data_ratio=train_data_ratio)
+                                                      train_data_ratio=train_data_ratio,
+                                                      deployment=deployment)
         else:
             assert False, 'Unknown dataset_name {}'.format(dataset_name)
 
@@ -413,13 +450,18 @@ class ImageCaptioning(object):
                         pickle.dump(embedding, f)
         return embedding
 
+    def load_vocabulary(self, prefix='unknown'):
+        vocab_file_path = self.workspace_dir + '/{}-vocab.pkl'.format(prefix)
+        print('Loading prebuilt vocabulary {} ... '.format(vocab_file_path), end='', flush=True)
+        with open(vocab_file_path, 'rb') as f:
+            vocab = pickle.load(f)
+        print('completed')
+        return vocab
+
     def build_vocabulary(self, captions, vocab_type='default', threshold=4, f_save=True, prefix='unknown'):
         vocab_file_path = self.workspace_dir + '/{}-vocab.pkl'.format(prefix)
         if os.path.exists(vocab_file_path):
-            print('Loading prebuilt vocabulary {} ... '.format(vocab_file_path), end='', flush=True)
-            with open(vocab_file_path, 'rb') as f:
-                vocab = pickle.load(f)
-            print('completed')
+            vocab = self.load_vocabulary(prefix=prefix)
         else:
             vocab = None
             if vocab_type == 'default':

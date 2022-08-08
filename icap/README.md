@@ -149,6 +149,7 @@ Output files will be generated in './workspace' directory and the structure will
 |   Flickr30k-vocab.pkl                     => Vocabulary DB
 |   Flickr30k-embedding_matrix_fasttext.pkl => Pretrained embedding matrix using Fasttext
 |   Flickr30k-caption_sequences.pkl         => Word sequence for training data
+|   Flickr30k-caption_sequence_info.pkl     => Metadata for caption sequences
 |
 +---Flickr30k-vgg16-include_top
 |       ......

@@ -399,24 +399,23 @@ class ImageCaptioningWithTransformer(ImageCaptioning):
 
         self.batch_size = batch_size
 
-        self.load_dataset(dataset_name)
+        self.load_dataset(dataset_name, deployment=deployment)
 
-        self.vocab = self.build_vocabulary(self.caption_data.get_train_captions(),
-                                           vocab_type='default',
-                                           threshold=10,
-                                           prefix=dataset_name)
-
-        self.caption_data.build_caption_seqs(self.vocab, prefix=dataset_name)
+        if deployment:
+            self.vocab = self.load_vocabulary(prefix=dataset_name)
+        else:
+            self.vocab = self.build_vocabulary(self.caption_data.get_train_captions(),
+                                               vocab_type='default',
+                                               threshold=10,
+                                               prefix=dataset_name)
+            self.caption_data.build_caption_seqs(self.vocab, prefix=dataset_name)
 
         self.embedding = self.build_embedding_matrix('fasttext', self.vocab, prefix=dataset_name)
 
         self.image_feature_extractor = ImageFeatureExtractorVGG16(self.dataset_name_base,
                                                                   self.caption_data.get_image_dir(),
                                                                   self.workspace_dir, include_top=False)
-        if deployment:
-            dummy_image = [ next(iter(self.caption_data.get_image_ids())) ]
-            self.image_feature_extractor.build_image_features(dummy_image)
-        else:
+        if not deployment:
             self.image_feature_extractor.build_image_features(self.caption_data.get_image_ids())
 
         print('Building training model ... ', end='')
