@@ -4,3 +4,4 @@ __pycache__/
 icap/data
 icap/workspace
 
+deployment/static
