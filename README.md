@@ -42,7 +42,7 @@ PS C:\ICapProduction\deployment> .\docker-run.bat
 <img src='web_request.png' width="50%">
 <br><br>
 
-* **Reposnse**<br>
+* **Response**<br>
 <img src='web_result.png' width="50%">
 
 ## REST API
